@@ -1,35 +1,182 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import os
-TOKEN = os.getenv("TOKEN")
-ITEMS = ["Mũ Tiểu Tiên","Nón TVC2","Áo TVC1","Quần Trẻ Trâu","Giày Hacker"]
-KEYS = {"ThanhHungCteHiHi": {"max":200,"used":[]},"ThanhHungCteVcl":{"max":15,"used":[]}}
-user_selected, user_activated = {}, {}
-def box_key():
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"🔑 {k}", callback_data=f"key_{k}")] for k in KEYS])
-def box_mod(uid):
-    sel = user_selected.get(uid,set())
-    kb = [[InlineKeyboardButton(f"{'✅' if i in sel else '⬜'} {ITEMS[i]}", callback_data=f"mod_{i}")] for i in range(len(ITEMS))]
-    kb.append([InlineKeyboardButton(f"📦 XUẤT FILE ({len(sel)})", callback_data="xuat")])
-    return InlineKeyboardMarkup(kb)
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in user_activated:
-        await update.message.reply_text("🔒 Chọn Key:", reply_markup=box_key())
-    else:
-        await update.message.reply_text("Chọn mod:", reply_markup=box_mod(uid))
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer(); uid = q.from_user.id; data = q.data
-    if data.startswith("key_"):
-        user_activated[uid]=data[4:]; user_selected[uid]=set()
-        await q.edit_message_text(f"✅ Kích hoạt {data[4:]}"); await q.message.reply_text("Chọn mod:", reply_markup=box_mod(uid))
-    elif data.startswith("mod_"):
-        i=int(data[4:]); user_selected.setdefault(uid,set())
-        user_selected[uid].remove(i) if i in user_selected[uid] else user_selected[uid].add(i)
-        await q.edit_message_reply_markup(reply_markup=box_mod(uid))
-    elif data=="xuat":
-        await q.message.reply_text(f"Đã chọn: {[ITEMS[i] for i in user_selected.get(uid,[])]}")
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(handle))
-app.run_polling()
+import shutil
+import subprocess
+import json
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+TOKEN = ' Nhập Token Vào Đây '
+bot = telebot.TeleBot(TOKEN)
+
+M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
+BACKUP_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay_backup.m'
+
+ZALO_GROUP_URL = 'https://zalo.me/g/jefec961jzjcav3izyxo'
+VERIFY_FILE = os.path.join(os.path.dirname(__file__), 'verified_users.json')
+
+
+def load_verified():
+    try:
+        with open(VERIFY_FILE, 'r', encoding='utf-8') as f:
+            return set(str(x) for x in json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def save_verified(users):
+    with open(VERIFY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(sorted(users), f, ensure_ascii=False, indent=2)
+
+
+def join_keyboard():
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton('📱 VÀO NHÓM ZALO', url=ZALO_GROUP_URL))
+    kb.row(InlineKeyboardButton('✅ TÔI ĐÃ VÀO NHÓM', callback_data='verify_zalo'))
+    return kb
+
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(
+        message,
+        "Chào Mày, Tao Là Bot Chuyên Độ FPS Cho Theos Đây\n\n"
+        "⚠️ Trước khi dùng /fps, bắt buộc vào nhóm Zalo.\n"
+        "Vào nhóm rồi bấm nút xác nhận bên dưới.",
+        reply_markup=join_keyboard()
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'verify_zalo')
+def verify_zalo(call):
+    users = load_verified()
+    users.add(str(call.from_user.id))
+    save_verified(users)
+    bot.answer_callback_query(call.id, "Đã xác nhận. Bạn có thể dùng /fps.", show_alert=True)
+    bot.send_message(call.message.chat.id, "✅ Đã xác nhận.\n\nDùng: /fps {Tên_FPS}")
+
+
+@bot.message_handler(commands=['fps'])
+def handle_fps(message):
+    if str(message.from_user.id) not in load_verified():
+        bot.reply_to(
+            message,
+            "🔒 Chưa được phép make FPS.\n\n"
+            "Bắt buộc vào nhóm Zalo trước, sau đó bấm "
+            "\"TÔI ĐÃ VÀO NHÓM\".",
+            reply_markup=join_keyboard()
+        )
+        return
+
+    try:
+        args = message.text.split(' ', 1)
+        if len(args) != 2 or not args[1].strip():
+            bot.reply_to(message, "Gõ: /fps {Tên_FPS}")
+            return
+
+        fps_name = args[1].strip().replace('\r', ' ').replace('\n', ' ')
+        backup_m_file()
+
+        try:
+            modify_m_file(fps_name)
+            msg = bot.reply_to(message, "Đang Cày, Ngồi Đợi Xíu Nha Mày")
+            if not run_make_commands(msg):
+                bot.edit_message_text(
+                    "❌ Build thất bại. Kiểm tra log Make/Theos.",
+                    chat_id=msg.chat.id, message_id=msg.message_id
+                )
+                return
+            send_dylib_file(message, msg, fps_name)
+        finally:
+            restore_m_file()
+
+    except Exception as e:
+        bot.reply_to(message, f"Toang Rồi Mày Ơi: {e}")
+
+
+def backup_m_file():
+    shutil.copy(M_FILE_PATH, BACKUP_FILE_PATH)
+
+
+def restore_m_file():
+    shutil.copy(BACKUP_FILE_PATH, M_FILE_PATH)
+
+
+def modify_m_file(fps_name):
+    with open(M_FILE_PATH, 'r', encoding='utf-8') as file:
+        content = file.read()
+
+    new_content = content.replace(
+        '@" %d FPS | %@ | Pin: %0.0f  Hello World "',
+        f'@" %d FPS | %@ | Pin: %0.0f  {fps_name}"'
+    )
+
+    with open(M_FILE_PATH, 'w', encoding='utf-8') as file:
+        file.write(new_content)
+
+
+def run_make_commands(msg):
+    subprocess.run(
+        ['make', 'clean'],
+        cwd=os.path.dirname(M_FILE_PATH),
+        text=True,
+        capture_output=True
+    )
+
+    make_process = subprocess.Popen(
+        ['make'],
+        cwd=os.path.dirname(M_FILE_PATH),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT
+    )
+
+    steps = 10
+    current_step = 0
+
+    while True:
+        output = make_process.stdout.readline()
+        if output == '' and make_process.poll() is not None:
+            break
+
+        if output:
+            current_step += 1
+            progress = min(90, int((current_step / steps) * 90))
+            try:
+                bot.edit_message_text(
+                    f"⚙️ Đang Make FPS: {progress}%",
+                    chat_id=msg.chat.id,
+                    message_id=msg.message_id
+                )
+            except Exception:
+                pass
+
+    return make_process.wait() == 0
+
+
+def send_dylib_file(message, msg, fps_name):
+    dylib_path = os.path.join(
+        os.path.dirname(M_FILE_PATH),
+        '.theos', 'obj', 'debug', 'NguyenThanhHung.dylib'
+    )
+
+    if not os.path.exists(dylib_path):
+        raise FileNotFoundError(f"Không tìm thấy file dylib: {dylib_path}")
+
+    with open(dylib_path, 'rb') as dylib_file:
+        bot.send_document(
+            message.chat.id,
+            dylib_file,
+            caption=f"✅ Xong 100%!\n🎮 FPS: {fps_name}\n📦 File dylib đã được gửi."
+        )
+
+    try:
+        bot.edit_message_text(
+            "✅ Xong 100% rồi nha, file đã gửi.",
+            chat_id=msg.chat.id,
+            message_id=msg.message_id
+        )
+    except Exception:
+        pass
+
+
+bot.polling()
