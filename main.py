@@ -5,7 +5,7 @@ import json
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = ' Nhập Token Vào Đây '
+TOKEN = ' TOKEN = '8317502262:AAHCj3VklMGqrlVrtuls5u7vUnMORzqOz50' '
 bot = telebot.TeleBot(TOKEN)
 
 M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
