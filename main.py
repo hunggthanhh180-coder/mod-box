@@ -1,58 +1,55 @@
 import os, shutil, subprocess, json, telebot, re, unicodedata
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN="8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI2yKCjzdTmk"
+TOKEN="8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI"
 bot=telebot.TeleBot(TOKEN)
-BASE_DIR=os.path.dirname(os.path.abspath(__file__))
-VERIFIED_FILE=os.path.join(BASE_DIR,'verified_users.json')
-
-def load_verified():
- try:
-  with open(VERIFIED_FILE,'r') as f: return set(json.load(f))
- except: return set()
-def save_verified(u):
- with open(VERIFIED_FILE,'w') as f: json.dump(list(u),f)
 
 def to_safe(name):
-    n = unicodedata.normalize('NFD', name)
-    n = n.encode('ascii','ignore').decode('ascii')
-    n = re.sub(r'[^A-Za-z0-9]', '', n)
-    return n or "120FPS"
+  n=unicodedata.normalize('NFD',name).encode('ascii','ignore').decode('utf-8')
+  n=re.sub(r'[^A-Za-z0-9]','',n)
+  return n or "120FPS"
 
-    bot.reply_to(message,"Dùng: /fps 120FPS");return
- fps_name=parts[1].strip()
- safe=to_safe(fps_name)
- bot.reply_to(message,f"⏳ Đang build: {fps_name} -> {safe}")
- try:
-  build_root=f"/tmp/fps_{message.from_user.id}"
-  if os.path.exists(build_root): shutil.rmtree(build_root)
-  deb_dir=os.path.join(build_root,"deb")
-  dylib_path=os.path.join(deb_dir,"Library/MobileSubstrate/DynamicLibraries")
-  debian_path=os.path.join(deb_dir,"DEBIAN")
-  os.makedirs(dylib_path,exist_ok=True)
-  os.makedirs(debian_path,exist_ok=True)
-  with open(os.path.join(dylib_path,"FPSDisplay.dylib"),'wb') as out:
-    out.write(b"dummy "+fps_name.encode())
-  control=f"Package: com.hung.fps{safe.lower()}\nName: {fps_name}\nVersion: 1.0\nArchitecture: iphoneos-arm\nDescription: {fps_name}\nMaintainer: Hung\n"
-  with open(os.path.join(debian_path,"control"),'w',newline='\n',encoding='utf-8') as cf:
-    cf.write(control)
-  # FIX QUAN TRỌNG LỖI 756
-  subprocess.run(["chmod","-R","0755",deb_dir],check=True)
-  subprocess.run(["chmod","0644",os.path.join(debian_path,"control")],check=True)
-  subprocess.run(["chmod","0644",os.path.join(dylib_path,"FPSDisplay.dylib")],check=True)
+def build_deb(fps_name, safe_name, user_id):
+  base=f"/tmp/fps_{user_id}"
+  if os.path.exists(base): shutil.rmtree(base)
+  deb_root=os.path.join(base,"deb")
+  debian_path=os.path.join(deb_root,"DEBIAN")
+  os.makedirs(debian_path, exist_ok=True)
+  lib=os.path.join(deb_root,"Library/MobileSubstrate/DynamicLibraries")
+  os.makedirs(lib, exist_ok=True)
 
-  deb_output=f"/tmp/{safe}.deb"
-  if os.path.exists(deb_output): os.remove(deb_output)
-  subprocess.run(["fakeroot","dpkg-deb","-b",deb_dir,deb_output],check=True)
-  with open(deb_output,'rb') as df:
-    bot.send_document(message.chat.id,df,caption=f"✅ Xong: {fps_name}")
- except Exception as e:
-  bot.reply_to(message,f"❌ Lỗi: {e}")
+  safe_low=safe_name.lower()
+  control=f"""Package: com.modbox.{safe_low}
+Name: {fps_name}
+Version: 1.0
+Architecture: iphoneos-arm
+Description: Unlock {fps_name}
+Maintainer: mod-box
+Section: Tweaks
+Depends: mobilesubstrate
+"""
+  cf=os.path.join(debian_path,"control")
+  with open(cf,"w",newline="\n") as f:
+    f.write(control.strip()+"\n\n")
+  os.chmod(debian_path,0o755)
+  os.chmod(cf,0o644)
+  os.chmod(deb_root,0o755)
+  subprocess.run(["chmod","-R","0755",lib],check=True)
+  out=os.path.join(base,f"{safe_name}.deb")
+  subprocess.run(["dpkg-deb","--build",deb_root,out],check=True)
+  return out
 
-#... giữ lại phần /start, verify zalo cũ của mày...
-import telebot
-@bot.message_handler(commands=['start'])
-def start(m): bot.reply_to(m,"Bot FPS - go /fps 120FPS")
+@bot.message_handler(commands=['fps'])
+def handle(m):
+  try:
+    parts=m.text.split(" ",1)
+    if len(parts)<2: return bot.reply_to(m,"Dung: /fps 120FPS")
+    fps_name=parts[1].strip()
+    safe=to_safe(fps_name)
+    bot.reply_to(m,f"⌛ Đang Cày: {safe}")
+    deb=build_deb(fps_name,safe,m.from_user.id)
+    with open(deb,"rb") as f: bot.send_document(m.chat.id,f,caption=f"✅ {safe}.deb")
+  except Exception as e:
+    bot.reply_to(m,f"❌ Lỗi: {e}")
 
-print("Bot dang chay...")
+print("Bot chay...")
 bot.infinity_polling()
