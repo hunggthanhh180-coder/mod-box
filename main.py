@@ -1,181 +1,156 @@
-import os
-import shutil
-import subprocess
-import json
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
- TOKEN = '8317502262:AAHCj3VklMGqrlVrtuls5u7vUnMORzqOz50' '
-bot = telebot.TeleBot(TOKEN)
+/*
+ FPSDisplay.m
+ Hệ thống:
+ - Không key: 1 lần/ngày
+ - THUNGCTEHIHI: 5 lần / thiết bị, tối đa 100 thiết bị
+ - NGUYENTHANHHUNG242: 30 lần / thiết bị, tối đa 2 thiết bị
+ - THANHHUNGCTE: 9999 lần / thiết bị, tối đa 5 thiết bị
+*/
 
-M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
-BACKUP_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay_backup.m'
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
-ZALO_GROUP_URL = 'https://zalo.me/g/jefec961jzjcav3izyxo'
-VERIFY_FILE = os.path.join(os.path.dirname(__file__), 'verified_users.json')
+static NSString * const kGroupURL =
+@"https://zalo.me/g/jefec961jzjcav3izyxo";
 
+@interface THKeyManager : NSObject
++ (instancetype)shared;
+- (BOOL)checkKey:(NSString *)key message:(NSString **)message;
+@end
 
-def load_verified():
-    try:
-        with open(VERIFY_FILE, 'r', encoding='utf-8') as f:
-            return set(str(x) for x in json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+@implementation THKeyManager
 
++ (instancetype)shared {
+    static THKeyManager *manager;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        manager = [THKeyManager new];
+    });
+    return manager;
+}
 
-def save_verified(users):
-    with open(VERIFY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(sorted(users), f, ensure_ascii=False, indent=2)
+- (NSString *)deviceID {
+    NSString *idfa = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
 
+    if (!idfa.length)
+        idfa = @"UNKNOWN_DEVICE";
 
-def join_keyboard():
-    kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton('📱 VÀO NHÓM ZALO', url=ZALO_GROUP_URL))
-    kb.row(InlineKeyboardButton('✅ TÔI ĐÃ VÀO NHÓM', callback_data='verify_zalo'))
-    return kb
+    return idfa;
+}
 
+- (BOOL)checkKey:(NSString *)key message:(NSString **)message {
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(
-        message,
-        "Chào Mày, Tao Là Bot Chuyên Độ FPS Cho Theos Đây\n\n"
-        "⚠️ Trước khi dùng /fps, bắt buộc vào nhóm Zalo.\n"
-        "Vào nhóm rồi bấm nút xác nhận bên dưới.",
-        reply_markup=join_keyboard()
-    )
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
 
+    NSString *device = [self deviceID];
 
-@bot.callback_query_handler(func=lambda call: call.data == 'verify_zalo')
-def verify_zalo(call):
-    users = load_verified()
-    users.add(str(call.from_user.id))
-    save_verified(users)
-    bot.answer_callback_query(call.id, "Đã xác nhận. Bạn có thể dùng /fps.", show_alert=True)
-    bot.send_message(call.message.chat.id, "✅ Đã xác nhận.\n\nDùng: /fps {Tên_FPS}")
+    // =========================
+    // KHÔNG NHẬP KEY
+    // =========================
+    if (key.length == 0) {
 
+        NSString *today = [[NSDate date] descriptionWithLocale:nil];
+        today = [today substringToIndex:10];
 
-@bot.message_handler(commands=['fps'])
-def handle_fps(message):
-    if str(message.from_user.id) not in load_verified():
-        bot.reply_to(
-            message,
-            "🔒 Chưa được phép make FPS.\n\n"
-            "Bắt buộc vào nhóm Zalo trước, sau đó bấm "
-            "\"TÔI ĐÃ VÀO NHÓM\".",
-            reply_markup=join_keyboard()
-        )
-        return
+        NSString *lastDay = [ud stringForKey:@"TH_LAST_DAY"];
+        NSInteger count = [ud integerForKey:@"TH_DAILY_COUNT"];
 
-    try:
-        args = message.text.split(' ', 1)
-        if len(args) != 2 or not args[1].strip():
-            bot.reply_to(message, "Gõ: /fps {Tên_FPS}")
-            return
+        if (![lastDay isEqualToString:today]) {
+            count = 0;
+            [ud setObject:today forKey:@"TH_LAST_DAY"];
+            [ud setInteger:0 forKey:@"TH_DAILY_COUNT"];
+        }
 
-        fps_name = args[1].strip().replace('\r', ' ').replace('\n', ' ')
-        backup_m_file()
+        if (count >= 1) {
+            if (message)
+                *message = @"Hôm nay bạn đã MAKE 1 lần.";
+            return NO;
+        }
 
-        try:
-            modify_m_file(fps_name)
-            msg = bot.reply_to(message, "Đang Cày, Ngồi Đợi Xíu Nha Mày")
-            if not run_make_commands(msg):
-                bot.edit_message_text(
-                    "❌ Build thất bại. Kiểm tra log Make/Theos.",
-                    chat_id=msg.chat.id, message_id=msg.message_id
-                )
-                return
-            send_dylib_file(message, msg, fps_name)
-        finally:
-            restore_m_file()
+        [ud setInteger:(count + 1) forKey:@"TH_DAILY_COUNT"];
 
-    except Exception as e:
-        bot.reply_to(message, f"Toang Rồi Mày Ơi: {e}")
+        if (message)
+            *message = @"MAKE thành công.";
 
+        return YES;
+    }
 
-def backup_m_file():
-    shutil.copy(M_FILE_PATH, BACKUP_FILE_PATH)
+    // =========================
+    // THUNGCTEHIHI
+    // 5 LẦN / 100 THIẾT BỊ
+    // =========================
+    if ([key isEqualToString:@"THUNGCTEHIHI"]) {
 
+        NSInteger count =
+            [ud integerForKey:@"KEY_THUNGCTEHIHI_COUNT"];
 
-def restore_m_file():
-    shutil.copy(BACKUP_FILE_PATH, M_FILE_PATH)
+        if (count >= 5) {
+            if (message)
+                *message = @"THUNGCTEHIHI đã hết 5 lượt trên thiết bị này.";
+            return NO;
+        }
 
+        [ud setInteger:(count + 1)
+                forKey:@"KEY_THUNGCTEHIHI_COUNT"];
 
-def modify_m_file(fps_name):
-    with open(M_FILE_PATH, 'r', encoding='utf-8') as file:
-        content = file.read()
+        if (message)
+            *message = @"THUNGCTEHIHI MAKE thành công.";
 
-    new_content = content.replace(
-        '@" %d FPS | %@ | Pin: %0.0f  Hello World "',
-        f'@" %d FPS | %@ | Pin: %0.0f  {fps_name}"'
-    )
+        return YES;
+    }
 
-    with open(M_FILE_PATH, 'w', encoding='utf-8') as file:
-        file.write(new_content)
+    // =========================
+    // NGUYENTHANHHUNG242
+    // 30 LẦN / 2 THIẾT BỊ
+    // =========================
+    if ([key isEqualToString:@"NGUYENTHANHHUNG242"]) {
 
+        NSInteger count =
+            [ud integerForKey:@"KEY_NGUYENTHANHHUNG242_COUNT"];
 
-def run_make_commands(msg):
-    subprocess.run(
-        ['make', 'clean'],
-        cwd=os.path.dirname(M_FILE_PATH),
-        text=True,
-        capture_output=True
-    )
+        if (count >= 30) {
+            if (message)
+                *message = @"NGUYENTHANHHUNG242 đã hết 30 lượt.";
+            return NO;
+        }
 
-    make_process = subprocess.Popen(
-        ['make'],
-        cwd=os.path.dirname(M_FILE_PATH),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
-    )
+        [ud setInteger:(count + 1)
+                forKey:@"KEY_NGUYENTHANHHUNG242_COUNT"];
 
-    steps = 10
-    current_step = 0
+        if (message)
+            *message = @"NGUYENTHANHHUNG242 MAKE thành công.";
 
-    while True:
-        output = make_process.stdout.readline()
-        if output == '' and make_process.poll() is not None:
-            break
+        return YES;
+    }
 
-        if output:
-            current_step += 1
-            progress = min(90, int((current_step / steps) * 90))
-            try:
-                bot.edit_message_text(
-                    f"⚙️ Đang Make FPS: {progress}%",
-                    chat_id=msg.chat.id,
-                    message_id=msg.message_id
-                )
-            except Exception:
-                pass
+    // =========================
+    // THANHHUNGCTE
+    // 9999 LẦN / 5 THIẾT BỊ
+    // =========================
+    if ([key isEqualToString:@"THANHHUNGCTE"]) {
 
-    return make_process.wait() == 0
+        NSInteger count =
+            [ud integerForKey:@"KEY_THANHHUNGCTE_COUNT"];
 
+        if (count >= 9999) {
+            if (message)
+                *message = @"THANHHUNGCTE đã hết lượt.";
+            return NO;
+        }
 
-def send_dylib_file(message, msg, fps_name):
-    dylib_path = os.path.join(
-        os.path.dirname(M_FILE_PATH),
-        '.theos', 'obj', 'debug', 'NguyenThanhHung.dylib'
-    )
+        [ud setInteger:(count + 1)
+                forKey:@"KEY_THANHHUNGCTE_COUNT"];
 
-    if not os.path.exists(dylib_path):
-        raise FileNotFoundError(f"Không tìm thấy file dylib: {dylib_path}")
+        if (message)
+            *message = @"THANHHUNGCTE MAKE thành công.";
 
-    with open(dylib_path, 'rb') as dylib_file:
-        bot.send_document(
-            message.chat.id,
-            dylib_file,
-            caption=f"✅ Xong 100%!\n🎮 FPS: {fps_name}\n📦 File dylib đã được gửi."
-        )
+        return YES;
+    }
 
-    try:
-        bot.edit_message_text(
-            "✅ Xong 100% rồi nha, file đã gửi.",
-            chat_id=msg.chat.id,
-            message_id=msg.message_id
-        )
-    except Exception:
-        pass
+    if (message)
+        *message = @"KEY không hợp lệ.";
 
+    return NO;
+}
 
-bot.polling()
+@end
