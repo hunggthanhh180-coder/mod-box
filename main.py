@@ -11,8 +11,8 @@ bot = telebot.TeleBot(TOKEN)
 
 
 
-M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
-BACKUP_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay_backup.m'
+M_FILE_PATH = 'FPSDisplay.m'
+BACKUP_FILE_PATH = 'FPSDisplay.m.bak'
 
 ZALO_GROUP_URL = 'https://zalo.me/g/jefec961jzjcav3izyxo'
 VERIFY_FILE = os.path.join(os.path.dirname(__file__), 'verified_users.json')
