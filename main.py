@@ -4,8 +4,9 @@ import subprocess
 import json
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+TOKEN = ' 8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI2yKCjzdTmk '
 bot = telebot.TeleBot(TOKEN)
-TOKEN = "8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI2yKCjzdTmk"
 
 M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
 BACKUP_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay_backup.m'
@@ -178,6 +179,4 @@ def send_dylib_file(message, msg, fps_name):
         pass
 
 
-if __name__ == "__main__":
-    print("Bot đang chạy...")
-    bot.infinity_polling()
+bot.polling()
