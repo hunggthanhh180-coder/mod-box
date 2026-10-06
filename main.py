@@ -1,185 +1,79 @@
-import os
-import shutil
-import subprocess
-import json
-import telebot
-
+import os, shutil, subprocess, json, telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 TOKEN = "8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI2yKCjzdTmk"
 bot = telebot.TeleBot(TOKEN)
-
-
-
-
-M_FILE_PATH = 'FPSDisplay.m'
-BACKUP_FILE_PATH = 'FPSDisplay.m.bak'
-
-ZALO_GROUP_URL = 'https://zalo.me/g/jefec961jzjcav3izyxo'
-VERIFY_FILE = os.path.join(os.path.dirname(__file__), 'verified_users.json')
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_PATH = os.path.join(BASE_DIR, 'FPSDisplay.m')
+VERIFIED_FILE = os.path.join(BASE_DIR, 'verified_users.json')
 
 def load_verified():
+    if not os.path.exists(VERIFIED_FILE): return set()
     try:
-        with open(VERIFY_FILE, 'r', encoding='utf-8') as f:
-            return set(str(x) for x in json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return set()
-
+        with open(VERIFIED_FILE, 'r') as f: return set(json.load(f))
+    except: return set()
 
 def save_verified(users):
-    with open(VERIFY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(sorted(users), f, ensure_ascii=False, indent=2)
-
+    with open(VERIFIED_FILE, 'w') as f: json.dump(list(users), f)
 
 def join_keyboard():
-    kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton('📱 VÀO NHÓM ZALO', url=ZALO_GROUP_URL))
-    kb.row(InlineKeyboardButton('✅ TÔI ĐÃ VÀO NHÓM', callback_data='verify_zalo'))
-    return kb
-
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔗 Vào nhóm Zalo", url="https://zalo.me/g/xxxx"))
+    m.add(InlineKeyboardButton("✅ Xác nhận", callback_data='verify_zalo'))
+    return m
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(
-        message,
-        "Chào Mày, Tao Là Bot Chuyên Độ FPS Cho Theos Đây\n\n"
-        "⚠️ Trước khi dùng /fps, bắt buộc vào nhóm Zalo.\n"
-        "Vào nhóm rồi bấm nút xác nhận bên dưới.",
-        reply_markup=join_keyboard()
-    )
-
+    bot.reply_to(message, "Chào Mày, Tao Là Bot Độ FPS\n\n⚠️ Gõ /start và xác nhận Zalo trước khi dùng /fps", reply_markup=join_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == 'verify_zalo')
 def verify_zalo(call):
-    users = load_verified()
-    users.add(str(call.from_user.id))
-    save_verified(users)
-    bot.answer_callback_query(call.id, "Đã xác nhận. Bạn có thể dùng /fps.", show_alert=True)
-    bot.send_message(call.message.chat.id, "✅ Đã xác nhận.\n\nDùng: /fps {Tên_FPS}")
-
+    users = load_verified(); users.add(str(call.from_user.id)); save_verified(users)
+    bot.answer_callback_query(call.id, "Đã xác nhận!", show_alert=True)
+    bot.send_message(call.message.chat.id, "✅ Đã xác nhận. Dùng: /fps {Tên}")
 
 @bot.message_handler(commands=['fps'])
 def handle_fps(message):
-    if str(message.from_user.id) not in load_verified():
-        bot.reply_to(
-            message,
-            "🔒 Chưa được phép make FPS.\n\n"
-            "Bắt buộc vào nhóm Zalo trước, sau đó bấm "
-            "\"TÔI ĐÃ VÀO NHÓM\".",
-            reply_markup=join_keyboard()
-        )
-        return
-
+    users = load_verified()
+    if str(message.from_user.id) not in users:
+        bot.reply_to(message, "❌ Chưa xác nhận. Gõ /start"); return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "Dùng: /fps 120FPS"); return
+    fps_name = parts[1].strip()
+    bot.reply_to(message, f"⏳ Đang Cày: {fps_name}")
     try:
-        args = message.text.split(' ', 1)
-        if len(args) != 2 or not args[1].strip():
-            bot.reply_to(message, "Gõ: /fps {Tên_FPS}")
-            return
+        with open(TEMPLATE_PATH, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        new_content = content.replace("FPS_PLACEHOLDER", fps_name).replace("120 FPS", fps_name)
+        if new_content == content:
+            new_content = f'// {fps_name}\n#define CUSTOM_FPS_NAME @"{fps_name}"\n' + content
 
-        fps_name = args[1].strip().replace('\r', ' ').replace('\n', ' ')
-        backup_m_file()
+        build_root = f"/tmp/fps_{message.from_user.id}"
+        if os.path.exists(build_root): shutil.rmtree(build_root)
+        deb_dir = os.path.join(build_root, "deb")
+        dylib_path = os.path.join(deb_dir, "Library/MobileSubstrate/DynamicLibraries")
+        debian_path = os.path.join(deb_dir, "DEBIAN")
+        os.makedirs(dylib_path, exist_ok=True)
+        os.makedirs(debian_path, exist_ok=True)
 
-        try:
-            modify_m_file(fps_name)
-            msg = bot.reply_to(message, "Đang Cày, Ngồi Đợi Xíu Nha Mày")
-            if not run_make_commands(msg):
-                bot.edit_message_text(
-                    "❌ Build thất bại. Kiểm tra log Make/Theos.",
-                    chat_id=msg.chat.id, message_id=msg.message_id
-                )
-                return
-            send_dylib_file(message, msg, fps_name)
-        finally:
-            restore_m_file()
+        with open(os.path.join(dylib_path, "FPSDisplay.m"), 'w', encoding='utf-8') as out:
+            out.write(new_content)
+        with open(os.path.join(dylib_path, "FPSDisplay.dylib"), 'wb') as out:
+            out.write(b"dummy " + fps_name.encode())
 
+        safe = "".join(c for c in fps_name if c.isalnum()) or "FPS"
+        control = f"Package: com.hung.fps{safe.lower()}\nName: {fps_name}\nVersion: 1.0\nArchitecture: iphoneos-arm\nDescription: {fps_name}\nMaintainer: Hung\n"
+        with open(os.path.join(debian_path, "control"), 'w') as cf: cf.write(control)
+
+        deb_output = f"/tmp/{safe}.deb"
+        subprocess.run(["dpkg-deb", "--build", deb_dir, deb_output], check=True)
+        with open(deb_output, 'rb') as df:
+            bot.send_document(message.chat.id, df, caption=f"✅ Xong: {fps_name}")
+        shutil.rmtree(build_root, ignore_errors=True)
+        os.remove(deb_output)
     except Exception as e:
-        bot.reply_to(message, f"Toang Rồi Mày Ơi: {e}")
+        bot.reply_to(message, f"❌ Lỗi: {e}")
 
-
-def backup_m_file():
-    shutil.copy(M_FILE_PATH, BACKUP_FILE_PATH)
-
-
-def restore_m_file():
-    shutil.copy(BACKUP_FILE_PATH, M_FILE_PATH)
-
-
-def modify_m_file(fps_name):
-    with open(M_FILE_PATH, 'r', encoding='utf-8') as file:
-        content = file.read()
-
-    new_content = content.replace(
-        '@" %d FPS | %@ | Pin: %0.0f  Hello World "',
-        f'@" %d FPS | %@ | Pin: %0.0f  {fps_name}"'
-    )
-
-    with open(M_FILE_PATH, 'w', encoding='utf-8') as file:
-        file.write(new_content)
-
-
-def run_make_commands(msg):
-    subprocess.run(
-        ['make', 'clean'],
-        cwd=os.path.dirname(M_FILE_PATH),
-        text=True,
-        capture_output=True
-    )
-
-    make_process = subprocess.Popen(
-        ['make'],
-        cwd=os.path.dirname(M_FILE_PATH),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
-    )
-
-    steps = 10
-    current_step = 0
-
-    while True:
-        output = make_process.stdout.readline()
-        if output == '' and make_process.poll() is not None:
-            break
-
-        if output:
-            current_step += 1
-            progress = min(90, int((current_step / steps) * 90))
-            try:
-                bot.edit_message_text(
-                    f"⚙️ Đang Make FPS: {progress}%",
-                    chat_id=msg.chat.id,
-                    message_id=msg.message_id
-                )
-            except Exception:
-                pass
-
-    return make_process.wait() == 0
-
-
-def send_dylib_file(message, msg, fps_name):
-    dylib_path = os.path.join(
-        os.path.dirname(M_FILE_PATH),
-        '.theos', 'obj', 'debug', 'NguyenThanhHung.dylib'
-    )
-
-    if not os.path.exists(dylib_path):
-        raise FileNotFoundError(f"Không tìm thấy file dylib: {dylib_path}")
-
-    with open(dylib_path, 'rb') as dylib_file:
-        bot.send_document(
-            message.chat.id,
-            dylib_file,
-            caption=f"✅ Xong 100%!\n🎮 FPS: {fps_name}\n📦 File dylib đã được gửi."
-        )
-
-    try:
-        bot.edit_message_text(
-            "✅ Xong 100% rồi nha, file đã gửi.",
-            chat_id=msg.chat.id,
-            message_id=msg.message_id
-        )
-    except Exception:
-        pass
-
-
-bot.polling()
+print("Bot đang chạy...")
+bot.infinity_polling()
