@@ -4,10 +4,8 @@ import subprocess
 import json
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
- TOKEN = "8317502262:AAGt3qX7NsGEMFppnbGxUV1EpVx12sDCp4E" "
 bot = telebot.TeleBot(TOKEN)
-
+TOKEN = "8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI2yKCjzdTmk"
 
 M_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay.m'
 BACKUP_FILE_PATH = '/workspaces/build/bot_make_fps_theos-main/FPSDisplay_backup.m'
