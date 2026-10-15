@@ -1,55 +1,138 @@
-import os, shutil, subprocess, json, telebot, re, unicodedata
+#import <UIKit/UIKit.h>
 
-TOKEN="8317502262:AAHY_u0-UI4Gmo0dd0a_WzbDI"
-bot=telebot.TeleBot(TOKEN)
+@interface FPSDisplay : NSObject
++ (instancetype)sharedInstance;
+- (void)show;
+- (void)hide;
+@end
+#import "FPSDisplay.h"
+#import <QuartzCore/QuartzCore.h>
 
-def to_safe(name):
-  n=unicodedata.normalize('NFD',name).encode('ascii','ignore').decode('utf-8')
-  n=re.sub(r'[^A-Za-z0-9]','',n)
-  return n or "120FPS"
+@interface FPSDisplay () {
+    UIWindow *_window;
+    UILabel *_label;
+    CADisplayLink *_displayLink;
+    NSTimeInterval _lastTime;
+    NSUInteger _count;
+}
+@end
 
-def build_deb(fps_name, safe_name, user_id):
-  base=f"/tmp/fps_{user_id}"
-  if os.path.exists(base): shutil.rmtree(base)
-  deb_root=os.path.join(base,"deb")
-  debian_path=os.path.join(deb_root,"DEBIAN")
-  os.makedirs(debian_path, exist_ok=True)
-  lib=os.path.join(deb_root,"Library/MobileSubstrate/DynamicLibraries")
-  os.makedirs(lib, exist_ok=True)
+@implementation FPSDisplay
 
-  safe_low=safe_name.lower()
-  control=f"""Package: com.modbox.{safe_low}
-Name: {fps_name}
-Version: 1.0
-Architecture: iphoneos-arm
-Description: Unlock {fps_name}
-Maintainer: mod-box
-Section: Tweaks
++ (instancetype)sharedInstance {
+    static FPSDisplay *sharedInstance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sharedInstance = [[self alloc] init];
+    });
+    return sharedInstance;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _window = [[UIWindow alloc] initWithFrame:CGRectMake(20, 40, 85, 26)];
+        _window.windowLevel = UIWindowLevelAlert + 9999;
+        _window.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.7];
+        _window.layer.cornerRadius = 6;
+        _window.clipsToBounds = YES;
+        
+        _label = [[UILabel alloc] initWithFrame:_window.bounds];
+        _label.textAlignment = NSTextAlignmentCenter;
+        _label.textColor = [UIColor greenColor];
+        _label.font = [UIFont boldSystemFontOfSize:13];
+        _label.text = @"FPS: --";
+        [_window addSubview:_label];
+        
+        [self show];
+    }
+    return self;
+}
+
+- (void)show {
+    _window.hidden = NO;
+    if (!_displayLink) {
+        _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+        [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void)hide {
+    _window.hidden = YES;
+    [_displayLink invalidate];
+    _displayLink = nil;
+}
+
+- (void)tick:(CADisplayLink *)link {
+    if (_lastTime == 0) {
+        _lastTime = link.timestamp;
+        return;
+    }
+    
+    _count++;
+    NSTimeInterval delta = link.timestamp - _lastTime;
+    if (delta >= 1.0) {
+        NSInteger fps = (NSInteger)(_count / delta);
+        _label.text = [NSString stringWithFormat:@"FPS: %ld", (long)fps];
+        
+        if (fps >= 50) {
+            _label.textColor = [UIColor greenColor];
+        } else if (fps >= 30) {
+            _label.textColor = [UIColor yellowColor];
+        } else {
+            _label.textColor = [UIColor redColor];
+        }
+        
+        _lastTime = link.timestamp;
+        _count = 0;
+    }
+}
+
+@end
+TARGET = iphone:clang:latest:14.0
+ARCHS = arm64 arm64e
+
+include $(THEOS)/makefiles/common.mk
+
+TWEAK_NAME = NguyenThanhHung
+
+NguyenThanhHung_FILES = FPSDisplay.m
+ThanhHungCte_FRAMEWORKS = UIKit QuartzCore
+
+include $(THEOS_MAKE_PATH)/tweak.mk
+Package: com.thanhhung.fpsdisplay
+Name: FPS Display Tweak
 Depends: mobilesubstrate
-"""
-  cf=os.path.join(debian_path,"control")
-  with open(cf,"w",newline="\n") as f:
-    f.write(control.strip()+"\n\n")
-  os.chmod(debian_path,0o755)
-  os.chmod(cf,0o644)
-  os.chmod(deb_root,0o755)
-  subprocess.run(["chmod","-R","0755",lib],check=True)
-  out=os.path.join(base,f"{safe_name}.deb")
-  subprocess.run(["dpkg-deb","--build",deb_root,out],check=True)
-  return out
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Tweak hiển thị FPS màn hình mượt mà.
+Maintainer: ThanhHung
+Author: Hungg
+{
+    Filter = {
+        Bundles = (
+            "com.apple.springboard",
+        );
+    };
+}
 
-@bot.message_handler(commands=['fps'])
-def handle(m):
-  try:
-    parts=m.text.split(" ",1)
-    if len(parts)<2: return bot.reply_to(m,"Dung: /fps 120FPS")
-    fps_name=parts[1].strip()
-    safe=to_safe(fps_name)
-    bot.reply_to(m,f"⌛ Đang Cày: {safe}")
-    deb=build_deb(fps_name,safe,m.from_user.id)
-    with open(deb,"rb") as f: bot.send_document(m.chat.id,f,caption=f"✅ {safe}.deb")
-  except Exception as e:
-    bot.reply_to(m,f"❌ Lỗi: {e}")
+Section: Tweaks
+#!/bin/bash
+echo "Đang tiến hành build tweak..."
+make package
+echo "Hoàn tất!"
+import os
+import subprocess
 
-print("Bot chay...")
-bot.infinity_polling()
+def main():
+    print("Bắt đầu build project tự động bằng Python...")
+    result = subprocess.run(["make", "package"], capture_output=True, text=True)
+    print(result.stdout)
+    if result.returncode == 0:
+        print("Build thành công!")
+    else:
+        print("Build thất bại:", result.stderr)
+
+if __name__ == "__main__":
+    main()
+requests>=2.28.0
